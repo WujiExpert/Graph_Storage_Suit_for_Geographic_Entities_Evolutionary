@@ -1,0 +1,46 @@
+{
+  "neo4j": {
+    "uri": "bolt://localhost:7687",
+    "user": "neo4j",
+    "password": "wang1026",
+    "database": "bench-db",
+    "isolated_db": true,
+    "db_parent": "/Users/wuji/Library/Application Support/neo4j-desktop/Application/Data/dbmss/dbms-b1116d6b-d328-417e-9309-5c18c687e212/data/databases",
+    "store_path": null
+  },
+  "experiments": {
+    "G1_Scale": {
+      "description": "Experiment 1: Scale Impact",
+      "variable": "n_entities",
+      "values": [100, 1000, 10000, 100000, 500000, 1000000]
+    },
+    "G2_Vol_Attr": {
+      "description": "Experiment 2: Attribute Volatility Impact",
+      "variable": "v_attribute",
+      "values": [0.05, 0.2, 0.4, 0.6, 0.8, 0.95]
+    },
+    "G3_Vol_Rel": {
+      "description": "Experiment 3: Relation Volatility Impact",
+      "variable": "v_relation",
+      "values": [0.01, 0.05, 0.1, 0.2, 0.3, 0.4]
+    },
+    "G4_Density_Props": {
+      "description": "Experiment 4: Data Density Impact",
+      "variable": "n_dynamic_props",
+      "values": [1, 5, 10, 15, 20, 30]
+    }
+  },
+  "benchmark": {
+    "models": ["A", "B", "C"],
+    "samples_per_query": 500,
+    "query_warmups": 1,
+    "query_runs": 5,
+    "batch_size": 5000
+  },
+  "paths": {
+    "queries_file": "queries.json",
+    "profile_output_dir": "experiment_profiles",
+    "results_output_file": "experiment_results.json"
+  }
+}
+

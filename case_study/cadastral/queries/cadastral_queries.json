@@ -1,0 +1,39 @@
+{
+  "Query1_PropertyHistoryTracking": {
+    "description": "Property history tracking: Track all property change history for a specified parcel within a specified time range",
+    "cypher": {
+      "A": "MATCH (p:Parcel {id: $bbl})\nUNWIND COALESCE(p.AssessTot_history, []) AS chunk\nWITH p, apoc.convert.fromJsonMap(chunk) AS hist\nWHERE hist.start >= $start_year AND hist.start <= $end_year\nRETURN 'AssessTot' AS attribute, hist.value AS value, hist.start AS change_time\nORDER BY hist.start",
+      "B": "MATCH (s:Parcel_State {id: $bbl})\nWHERE s.start >= $start_year AND (s.end IS NULL OR s.end <= $end_year)\nRETURN 'AssessTot' AS attribute, s.AssessTot AS value, s.start AS change_time\nORDER BY s.start",
+      "C": "MATCH (p:Parcel {id: $bbl})-[:HAS_PROCESS {attr:'AssessTot'}]->(head:ProcessNode)\nMATCH (head)-[:NEXT_STATE*0..]->(node:ProcessNode)\nWHERE node.start >= $start_year AND (node.end IS NULL OR node.end <= $end_year)\nRETURN 'AssessTot' AS attribute, node.value AS value, node.start AS change_time\nORDER BY node.start"
+    },
+    "params": {
+      "bbl": "1000287501",
+      "start_year": 2011,
+      "end_year": 2020
+    }
+  },
+  "Query2_TopologyEvolutionPath": {
+    "description": "Topology evolution path query: Track the topology evolution path of a specified parcel (split, merge, re-identification)",
+    "cypher": {
+      "A": "MATCH (p:Parcel {id: $bbl})-[r:SPLIT_INTO|MERGED_INTO|REID_AS]->(target:Parcel)\nRETURN type(r) AS relation_type, target.id AS target_bbl, r.start AS evolution_time\nORDER BY r.start",
+      "B": "MATCH (s:Parcel_State {id: $bbl})-[r:SPLIT_INTO|MERGED_INTO|REID_AS]->(target:Parcel_State)\nRETURN type(r) AS relation_type, target.id AS target_bbl, s.start AS evolution_time\nORDER BY s.start",
+      "C": "MATCH (p:Parcel {id: $bbl})-[:HAS_PROCESS]->(head:ProcessNode)\nWHERE head.attr IN ['SPLIT_INTO', 'MERGED_INTO', 'REID_AS']\nMATCH (head)-[:NEXT_STATE*0..]->(pn:ProcessNode)\nWHERE pn.attr IN ['SPLIT_INTO', 'MERGED_INTO', 'REID_AS']\nMATCH (pn)-[r:SPLIT_INTO|MERGED_INTO|REID_AS]->(target:Parcel)\nRETURN type(r) AS relation_type, target.id AS target_bbl, pn.start AS evolution_time\nORDER BY pn.start"
+    },
+    "params": {
+      "bbl": "1017890046"
+    }
+  },
+  "Query3_SpatioTemporalJointQuery": {
+    "description": "Spatio-temporal joint query: At a specified time point, find parcels satisfying specific attribute conditions and their topology relationships",
+    "cypher": {
+      "A": "MATCH (p:Parcel)\nUNWIND COALESCE(p['AssessTot_history'], []) AS chunk1\nWITH p, apoc.convert.fromJsonMap(chunk1) AS hist1\nWHERE hist1.start <= $time AND (hist1.end IS NULL OR hist1.end >= $time)\n  AND toFloat(hist1.value) > $min_assess\nUNWIND COALESCE(p['LandUse_history'], []) AS chunk2\nWITH p, hist1, apoc.convert.fromJsonMap(chunk2) AS hist2\nWHERE hist2.start <= $time AND (hist2.end IS NULL OR hist2.end >= $time)\n  AND hist2.value = $landuse\nMATCH (p)-[r:SPLIT_INTO|MERGED_INTO|REID_AS]->(target:Parcel)\nWHERE r.start <= $time AND (r.end IS NULL OR r.end >= $time)\nRETURN p.id AS bbl, target.id AS related_bbl, type(r) AS relation_type\nLIMIT 100",
+      "B": "MATCH (s:Parcel_State)\nWHERE s.start <= $time AND (s.end IS NULL OR s.end >= $time)\n  AND toFloat(s.AssessTot) > $min_assess\n  AND s.LandUse = $landuse\nMATCH (s)-[r:SPLIT_INTO|MERGED_INTO|REID_AS]->(target:Parcel_State)\nWHERE s.start <= $time AND (s.end IS NULL OR s.end >= $time)\nRETURN s.id AS bbl, target.id AS related_bbl, type(r) AS relation_type\nLIMIT 100",
+      "C": "MATCH (p:Parcel)\nWITH p, $time AS time_val\nMATCH (p)-[:HAS_PROCESS {attr:'AssessTot'}]->(head1:ProcessNode)\nCALL (head1, time_val) {\n  WITH head1, time_val\n  MATCH (head1)-[:NEXT_STATE*0..]->(node1:ProcessNode)\n  WHERE node1.start <= time_val AND (node1.end IS NULL OR node1.end >= time_val)\n  RETURN node1 ORDER BY node1.start DESC LIMIT 1\n}\nWITH p, node1, time_val\nWHERE node1 IS NOT NULL AND toFloat(node1.value) > $min_assess\nMATCH (p)-[:HAS_PROCESS {attr:'LandUse'}]->(head2:ProcessNode)\nCALL (head2, time_val) {\n  WITH head2, time_val\n  MATCH (head2)-[:NEXT_STATE*0..]->(node2:ProcessNode)\n  WHERE node2.start <= time_val AND (node2.end IS NULL OR node2.end >= time_val)\n  RETURN node2 ORDER BY node2.start DESC LIMIT 1\n}\nWITH p, node1, node2, time_val\nWHERE node2 IS NOT NULL AND node2.value = $landuse\nMATCH (p)-[:HAS_PROCESS]->(head_rel:ProcessNode)\nWHERE head_rel.attr IN ['SPLIT_INTO', 'MERGED_INTO', 'REID_AS']\nMATCH (head_rel)-[:NEXT_STATE*0..]->(pn:ProcessNode)\nWHERE pn.attr = head_rel.attr\n  AND pn.start <= time_val AND (pn.end IS NULL OR pn.end >= time_val)\nMATCH (pn)-[r]->(target:Parcel)\nWHERE type(r) IN ['SPLIT_INTO', 'MERGED_INTO', 'REID_AS']\nRETURN p.id AS bbl, target.id AS related_bbl, type(r) AS relation_type\nLIMIT 100"
+    },
+    "params": {
+      "time": 2018,
+      "min_assess": 30000000,
+      "landuse": "5"
+    }
+  }
+}

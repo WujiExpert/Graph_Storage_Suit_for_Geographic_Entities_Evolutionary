@@ -1,0 +1,31 @@
+{
+  "Latency_Snapshot": {
+    "cypher": {
+      "A": "MATCH (c:City {id:$entityId})\nWITH c, COALESCE(c[$attr + '_history'], []) AS history\nUNWIND history AS chunk\nWITH c, apoc.convert.fromJsonMap(chunk) AS hist\nWHERE hist.start <= $time AND (hist.end IS NULL OR hist.end >= $time)\nRETURN c.id AS entity_id, $attr AS attribute, hist.value AS value, hist.start AS start, hist.end AS end\nORDER BY hist.start DESC\nLIMIT 1",
+      "B": "MATCH (s:City_State {id:$entityId})\nWHERE s.start <= $time AND (s.end IS NULL OR s.end >= $time)\nRETURN s.id AS entity_id, $attr AS attribute, s[$attr] AS value, s.start AS start, s.end AS end\nORDER BY s.start DESC\nLIMIT 1",
+      "C": "MATCH (c:City {id:$entityId})-[:HAS_PROCESS {attr:$attr}]->(head:ProcessNode)\nCALL (head) {\n  WITH head\n  MATCH (head)-[:NEXT_STATE*0..]->(node:ProcessNode)\n  WHERE node.start <= $time AND (node.end IS NULL OR node.end >= $time)\n  RETURN node\n  ORDER BY node.start DESC\n  LIMIT 1\n}\nWITH c, node\nRETURN c.id AS entity_id, $attr AS attribute, node.value AS value, node.start AS start, node.end AS end"
+    }
+  },
+  "Latency_History": {
+    "cypher": {
+      "A": "MATCH (c:City {id:$entityId})\nUNWIND COALESCE(c[$attr + '_history'], []) AS chunk\nWITH c, apoc.convert.fromJsonMap(chunk) AS hist\nRETURN c.id AS entity_id, hist.start AS start, hist.end AS end, hist.value AS value\nORDER BY hist.start",
+      "B": "MATCH (s:City_State {id:$entityId})\nWHERE s[$attr] IS NOT NULL\nRETURN s.id AS entity_id, s.start AS start, s.end AS end, s[$attr] AS value\nORDER BY s.start",
+      "C": "MATCH (c:City {id:$entityId})-[:HAS_PROCESS {attr:$attr}]->(head:ProcessNode)\nMATCH (head)-[:NEXT_STATE*0..]->(node:ProcessNode)\nRETURN c.id AS entity_id, node.start AS start, node.end AS end, node.value AS value\nORDER BY node.start"
+    }
+  },
+  "Latency_Evolution": {
+    "cypher": {
+      "A": "MATCH (c:City {id:$entityId})-[r]->(target:Region)\nWHERE type(r) = $relType\n  AND r.start <= $time AND (r.end IS NULL OR r.end >= $time)\nRETURN c.id AS entity_id, type(r) AS rel_type, target.id AS target_id, r.start AS start, r.end AS end",
+      "B": "MATCH (s:City_State {id:$entityId})\nWHERE s.start <= $time AND (s.end IS NULL OR s.end >= $time)\nWITH s ORDER BY s.start DESC LIMIT 1\nMATCH (s)-[r]->(t:Region_State)\nWHERE type(r) = $relType\n  AND t.start <= $time AND (t.end IS NULL OR t.end >= $time)\nRETURN s.sid AS state_sid, t.sid AS target_sid, t.id AS target_id",
+      "C": "MATCH (c:City {id:$entityId})-[:HAS_PROCESS {attr:$relAttr}]->(head:ProcessNode)\nCALL (head) {\n  WITH head\n  MATCH (head)-[:NEXT_STATE*0..]->(node:ProcessNode)\n  WHERE node.start <= $time AND (node.end IS NULL OR node.end >= $time)\n  RETURN node\n  ORDER BY node.start DESC\n  LIMIT 1\n}\nWITH c, node\nWHERE node IS NOT NULL\nMATCH (node)-[r]->(target:Region)\nWHERE type(r) = $relType\nRETURN c.id AS entity_id, target.id AS target_id, node.start AS start, node.end AS end"
+    }
+  },
+  "Latency_SpatioTemporal": {
+    "cypher": {
+      "A": "MATCH (c:City)-[r]->(region:Region {id:$regionId})\nWHERE type(r) = $relType\n  AND r.start <= $time AND (r.end IS NULL OR r.end >= $time)\nUNWIND COALESCE(c[$attr + '_history'], []) AS chunk\nWITH c, region, apoc.convert.fromJsonMap(chunk) AS hist\nWHERE hist.start <= $time AND (hist.end IS NULL OR hist.end >= $time)\n  AND hist.value >= $minValue\nRETURN c.id AS city_id, region.id AS region_id, hist.value AS value\nORDER BY hist.value DESC\nLIMIT 20",
+      "B": "MATCH (region:Region_State {id:$regionId})\nWHERE region.start <= $time AND (region.end IS NULL OR region.end >= $time)\nMATCH (s:City_State)-[r]->(region)\nWHERE type(r) = $relType\n  AND s.start <= $time AND (s.end IS NULL OR s.end >= $time)\n  AND s[$attr] IS NOT NULL AND s[$attr] >= $minValue\nRETURN s.id AS city_id, region.id AS region_id, s[$attr] AS value, s.sid AS state_sid\nORDER BY value DESC\nLIMIT 20",
+      "C": "MATCH (region:Region {id:$regionId})\nWITH region\nMATCH (city:City)-[:HAS_PROCESS {attr:$relAttr}]->(relHead:ProcessNode)\nCALL (relHead) {\n  WITH relHead\n  MATCH (relHead)-[:NEXT_STATE*0..]->(relNode:ProcessNode)\n  WHERE relNode.start <= $time AND (relNode.end IS NULL OR relNode.end >= $time)\n  RETURN relNode\n  ORDER BY relNode.start DESC\n  LIMIT 1\n}\nWITH city, region, relNode\nWHERE relNode IS NOT NULL\nMATCH (relNode)-[r]->(region)\nWHERE type(r) = $relType\nWITH city, region\nMATCH (city)-[:HAS_PROCESS {attr:$attr}]->(attrHead:ProcessNode)\nCALL (attrHead) {\n  WITH attrHead\n  MATCH (attrHead)-[:NEXT_STATE*0..]->(attrNode:ProcessNode)\n  WHERE attrNode.start <= $time AND (attrNode.end IS NULL OR attrNode.end >= $time)\n  RETURN attrNode\n  ORDER BY attrNode.start DESC\n  LIMIT 1\n}\nWITH city, region, attrNode\nWHERE attrNode IS NOT NULL AND attrNode.value >= $minValue\nRETURN city.id AS city_id, region.id AS region_id, attrNode.value AS value\nORDER BY value DESC\nLIMIT 20"
+    }
+  }
+}
+
